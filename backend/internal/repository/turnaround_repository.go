@@ -3,8 +3,10 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"groundclearance/internal/constants"
 	"groundclearance/internal/model"
 
 	"gorm.io/gorm"
@@ -53,6 +55,44 @@ func (r *TurnaroundRepository) FindActiveByGroundUnitTx(tx *gorm.DB, unitID uint
 		Where("status <> ? AND ground_unit_ids @> ?::jsonb", "completed", unitJSON).
 		Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("lock active turnarounds by ground unit: %w", err)
+	}
+	return rows, nil
+}
+
+// FindWindowConflictsTx locks and returns non-completed turnarounds assigned to
+// the unit whose planned 90-minute window overlaps [windowStart, windowEnd).
+// Windows are half-open: a turnaround ending exactly at windowStart is allowed
+// (back-to-back chaining) and is not returned.
+func (r *TurnaroundRepository) FindWindowConflictsTx(tx *gorm.DB, unitID uint64, windowStart, windowEnd time.Time) ([]model.Turnaround, error) {
+	var rows []model.Turnaround
+	unitJSON := fmt.Sprintf(`["%d"]`, unitID)
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("status <> ?", "completed").
+		Where("ground_unit_ids @> ?::jsonb", unitJSON).
+		Where("scheduled_at < ? AND scheduled_at + (? * interval '1 minute') > ?", windowEnd, constants.ScheduleWindowMinutes, windowStart).
+		Order("scheduled_at ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lock turnaround window conflicts by ground unit: %w", err)
+	}
+	return rows, nil
+}
+
+// ListOccupyingByUnits returns non-completed turnarounds assigned to any of the
+// given units. Callers are responsible for excluding revoked clearances.
+func (r *TurnaroundRepository) ListOccupyingByUnits(unitIDs []uint64) ([]model.Turnaround, error) {
+	if len(unitIDs) == 0 {
+		return nil, nil
+	}
+	clausesList := make([]string, 0, len(unitIDs))
+	args := make([]any, 0, len(unitIDs))
+	for _, id := range unitIDs {
+		clausesList = append(clausesList, "ground_unit_ids @> ?::jsonb")
+		args = append(args, fmt.Sprintf(`["%d"]`, id))
+	}
+	var rows []model.Turnaround
+	if err := r.db.Where("status <> ?", "completed").
+		Where("("+strings.Join(clausesList, " OR ")+")", args...).
+		Order("scheduled_at ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list occupying turnarounds by ground units: %w", err)
 	}
 	return rows, nil
 }

@@ -13,9 +13,11 @@ import { MatTableModule } from '@angular/material/table';
 import { turnaroundCreateApi, turnaroundStatusApi } from '../api/turnaround.api';
 import { RiskBadgeComponent } from '../components/common/risk-badge.component';
 import { StatusBadgeComponent } from '../components/common/status-badge.component';
+import { UnitScheduleComponent } from '../components/common/unit-schedule.component';
 import { ROLE } from '../constants/enums';
 import { useAuth } from '../hooks/use-auth';
 import { usePagination } from '../hooks/use-pagination';
+import { ScheduleStore } from '../stores/schedule.store';
 import { TurnaroundStore } from '../stores/turnaround.store';
 import { RiskLevel, Turnaround } from '../types';
 import { parseHttpError, useHttp } from '../utils/request';
@@ -25,7 +27,8 @@ import { parseHttpError, useHttp } from '../utils/request';
   standalone: true,
   imports: [
     CommonModule, ReactiveFormsModule, MatButtonModule, MatFormFieldModule, MatIconModule, MatInputModule,
-    MatProgressBarModule, MatPaginatorModule, MatSelectModule, MatSnackBarModule, MatTableModule, RiskBadgeComponent, StatusBadgeComponent,
+    MatProgressBarModule, MatPaginatorModule, MatSelectModule, MatSnackBarModule, MatTableModule,
+    RiskBadgeComponent, StatusBadgeComponent, UnitScheduleComponent,
   ],
   template: `
     <header class="page-head">
@@ -41,7 +44,7 @@ import { parseHttpError, useHttp } from '../utils/request';
     </section>
 
     <section *ngIf="showCreate" class="create-band">
-      <div class="band-title"><mat-icon>add_circle</mat-icon><span><strong>建立航班周转阶段</strong><small>同步创建首个安全检查项和待放行记录</small></span></div>
+      <div class="band-title"><mat-icon>add_circle</mat-icon><span><strong>建立航班周转阶段</strong><small>自计划时间起为每台设备预留 {{ schedule.board().reserve_minutes }} 分钟计划窗口；首尾相接可接续，窗口重叠将停止建单并指出冲突航班，已完成/已撤销周转不再占位</small></span></div>
       <form [formGroup]="form" (ngSubmit)="create()">
         <mat-form-field appearance="outline"><mat-label>航班号</mat-label><input matInput formControlName="flight_no"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>机位</mat-label><input matInput formControlName="stand"></mat-form-field>
@@ -71,7 +74,7 @@ import { parseHttpError, useHttp } from '../utils/request';
         <table mat-table [dataSource]="store.items()">
           <ng-container matColumnDef="flight"><th mat-header-cell *matHeaderCellDef>航班 / 机位</th><td mat-cell *matCellDef="let row"><strong>{{ row.flight_no }}</strong><small>{{ row.stand }} · {{ phaseText(row.phase) }}</small></td></ng-container>
           <ng-container matColumnDef="schedule"><th mat-header-cell *matHeaderCellDef>计划时间</th><td mat-cell *matCellDef="let row">{{ row.scheduled_at | date:'MM-dd HH:mm' }}</td></ng-container>
-          <ng-container matColumnDef="units"><th mat-header-cell *matHeaderCellDef>投入设备</th><td mat-cell *matCellDef="let row">{{ row.ground_unit_ids.length ? row.ground_unit_ids.join(', ') : '未分配' }}</td></ng-container>
+          <ng-container matColumnDef="units"><th mat-header-cell *matHeaderCellDef>投入设备 / 下一段占用</th><td mat-cell *matCellDef="let row"><div class="unit-list" *ngIf="row.ground_unit_ids.length; else noUnits"><div class="unit-row" *ngFor="let unitId of row.ground_unit_ids"><span class="unit-id">#{{ unitId }}</span><app-unit-schedule [occupancy]="schedule.byUnitId(unitId)"></app-unit-schedule></div></div><ng-template #noUnits>未分配</ng-template></td></ng-container>
           <ng-container matColumnDef="risk"><th mat-header-cell *matHeaderCellDef>风险</th><td mat-cell *matCellDef="let row"><app-risk-badge [level]="row.risk_level"></app-risk-badge></td></ng-container>
           <ng-container matColumnDef="status"><th mat-header-cell *matHeaderCellDef>状态</th><td mat-cell *matCellDef="let row"><app-status-badge [value]="row.status"></app-status-badge></td></ng-container>
           <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let row"><button *ngIf="canManage && row.status === 'open'" mat-stroked-button (click)="startChecks(row)">开始检查</button></td></ng-container>
@@ -82,9 +85,15 @@ import { parseHttpError, useHttp } from '../utils/request';
       <mat-paginator [length]="store.total()" [pageIndex]="pagination.page() - 1" [pageSize]="pagination.pageSize()" [pageSizeOptions]="[10, 20, 50, 100]" (page)="pageChanged($event)"></mat-paginator>
     </section>
   `,
+  styles: [`
+    .unit-list { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; min-width: 280px; }
+    .unit-row { display: flex; align-items: flex-start; gap: 8px; }
+    .unit-id { font-weight: 600; color: #455a64; min-width: 34px; padding-top: 1px; }
+  `],
 })
 export class TurnaroundsPage implements OnInit {
   readonly store = inject(TurnaroundStore);
+  readonly schedule = inject(ScheduleStore);
   private readonly fb = inject(FormBuilder);
   private readonly http = useHttp();
   private readonly snack = inject(MatSnackBar);
@@ -104,10 +113,10 @@ export class TurnaroundsPage implements OnInit {
     check_code: ['OPS-001', Validators.required], check_name: ['设备外观、制动与安全区域确认', Validators.required],
   });
 
-  ngOnInit(): void { this.reload(); }
+  ngOnInit(): void { this.reload(); this.schedule.load(); }
   phaseText(phase: string): string { return ({ arrival: '进港', servicing: '保障中', departure: '离港' } as Record<string, string>)[phase] || phase; }
   filterStatus(status: string): void { this.statusFilter = status; this.resetAndLoad(); }
-  reload(): void { this.store.load(this.pagination.page(), this.pagination.pageSize(), this.statusFilter, '', this.searchText); }
+  reload(): void { this.store.load(this.pagination.page(), this.pagination.pageSize(), this.statusFilter, '', this.searchText); this.schedule.load(); }
   resetAndLoad(): void { this.pagination.reset(); this.reload(); }
   pageChanged(event: PageEvent): void { this.pagination.setPage(event.pageIndex + 1); this.pagination.pageSize.set(event.pageSize); this.reload(); }
 

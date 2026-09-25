@@ -2,9 +2,12 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"groundclearance/internal/constants"
+	"groundclearance/internal/model"
 	"groundclearance/internal/util"
 )
 
@@ -82,5 +85,56 @@ func TestSharedEnums(t *testing.T) {
 	}
 	if !constants.IsValidRiskLevel(constants.RiskCritical) || constants.IsValidRiskLevel("urgent") {
 		t.Fatal("risk validation mismatch")
+	}
+}
+
+func TestPlannedWindowOverlap(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	ninety := time.Duration(constants.ScheduleWindowMinutes) * time.Minute
+	cases := []struct {
+		name           string
+		startA, startB time.Time
+		want           bool
+	}{
+		{"fully disjoint", base, base.Add(3 * time.Hour), false},
+		{"back to back chains", base, base.Add(ninety), false},
+		{"one minute overlap", base, base.Add(ninety - time.Minute), true},
+		{"surrounding window", base.Add(-30 * time.Minute), base, true},
+	}
+	for _, item := range cases {
+		got := windowsOverlap(item.startA, item.startA.Add(ninety), item.startB, item.startB.Add(ninety))
+		if got != item.want {
+			t.Fatalf("%s: got %v want %v", item.name, got, item.want)
+		}
+	}
+}
+
+func TestTurnaroundHoldsWindow(t *testing.T) {
+	if !turnaroundHolds(nil) {
+		t.Fatal("missing decision is treated conservatively as still holding")
+	}
+	if !turnaroundHolds(&model.ClearanceDecision{State: constants.ClearancePending}) {
+		t.Fatal("pending turnaround must still occupy its planned window")
+	}
+	if !turnaroundHolds(&model.ClearanceDecision{State: constants.ClearanceCleared}) {
+		t.Fatal("cleared turnaround still occupies the schedule until completion")
+	}
+	if turnaroundHolds(&model.ClearanceDecision{State: constants.ClearanceRevoked}) {
+		t.Fatal("revoked turnaround must release the planned window")
+	}
+}
+
+func TestWindowConflictErrorNamesFlight(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	units := map[uint64]*model.GroundUnit{7: {ID: 7, UnitCode: "TUG-017"}}
+	blocker := model.Turnaround{FlightNo: "CA1831", ScheduledAt: base}
+	err := NewWindowConflictError(units, 7, blocker)
+	if err == nil || err.Code != constants.CodeStateConflict {
+		t.Fatalf("unexpected conflict error: %v", err)
+	}
+	for _, fragment := range []string{"CA1831", "TUG-017", "10:00", "11:30"} {
+		if !strings.Contains(err.Message, fragment) {
+			t.Fatalf("conflict message must contain %q, got %q", fragment, err.Message)
+		}
 	}
 }

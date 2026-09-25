@@ -14,10 +14,12 @@ import { MatTableModule } from '@angular/material/table';
 import { groundUnitCreateApi, groundUnitStateApi } from '../api/ground-unit.api';
 import { ConfirmDialogComponent } from '../components/common/confirm-dialog.component';
 import { StatusBadgeComponent } from '../components/common/status-badge.component';
+import { UnitScheduleComponent } from '../components/common/unit-schedule.component';
 import { ROLE, UNIT_STATE_TEXT } from '../constants/enums';
 import { useAuth } from '../hooks/use-auth';
 import { usePagination } from '../hooks/use-pagination';
 import { GroundUnitStore } from '../stores/ground-unit.store';
+import { ScheduleStore } from '../stores/schedule.store';
 import { GroundUnit, UnitState } from '../types';
 import { parseHttpError, useHttp } from '../utils/request';
 
@@ -26,11 +28,12 @@ import { parseHttpError, useHttp } from '../utils/request';
   standalone: true,
   imports: [
     CommonModule, ReactiveFormsModule, MatButtonModule, MatDialogModule, MatFormFieldModule, MatIconModule,
-    MatInputModule, MatPaginatorModule, MatProgressBarModule, MatSelectModule, MatSnackBarModule, MatTableModule, StatusBadgeComponent,
+    MatInputModule, MatPaginatorModule, MatProgressBarModule, MatSelectModule, MatSnackBarModule, MatTableModule,
+    StatusBadgeComponent, UnitScheduleComponent,
   ],
   template: `
     <header class="page-head">
-      <div><p>GROUND UNIT CONTROL</p><h1>地面设备状态</h1><span>设备可用性直接参与周转编排与放行判断</span></div>
+      <div><p>GROUND UNIT CONTROL</p><h1>地面设备状态</h1><span>设备可用性直接参与周转编排与放行判断；按计划时间预留 {{ schedule.board().reserve_minutes }} 分钟窗口，首尾相接可接续</span></div>
       <button *ngIf="canManage" mat-flat-button (click)="showCreate = !showCreate"><mat-icon>{{ showCreate ? 'close' : 'add' }}</mat-icon>{{ showCreate ? '收起' : '登记设备' }}</button>
     </header>
     <section class="metrics">
@@ -66,6 +69,7 @@ import { parseHttpError, useHttp } from '../utils/request';
           <ng-container matColumnDef="type"><th mat-header-cell *matHeaderCellDef>类型</th><td mat-cell *matCellDef="let row">{{ typeText(row.unit_type) }}</td></ng-container>
           <ng-container matColumnDef="stand"><th mat-header-cell *matHeaderCellDef>机位</th><td mat-cell *matCellDef="let row">{{ row.stand }}</td></ng-container>
           <ng-container matColumnDef="inspection"><th mat-header-cell *matHeaderCellDef>最近检查</th><td mat-cell *matCellDef="let row">{{ row.last_inspection_at ? (row.last_inspection_at | date:'MM-dd HH:mm') : '未记录' }}</td></ng-container>
+          <ng-container matColumnDef="schedule"><th mat-header-cell *matHeaderCellDef>计划占用（{{ schedule.board().reserve_minutes }} 分钟）</th><td mat-cell *matCellDef="let row"><app-unit-schedule [occupancy]="schedule.byUnitId(row.id)"></app-unit-schedule></td></ng-container>
           <ng-container matColumnDef="state"><th mat-header-cell *matHeaderCellDef>状态</th><td mat-cell *matCellDef="let row"><app-status-badge [value]="row.state"></app-status-badge><small class="note">{{ row.notes }}</small></td></ng-container>
           <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let row"><div class="row-actions"><button *ngIf="canReport && row.state !== 'blocked' && row.state !== 'retired'" mat-stroked-button color="warn" (click)="changeState(row, 'blocked')">锁定</button><button *ngIf="canManage && (row.state === 'blocked' || row.state === 'inspection')" mat-stroked-button (click)="changeState(row, 'available')">恢复可用</button></div></td></ng-container>
           <tr mat-header-row *matHeaderRowDef="columns"></tr><tr mat-row *matRowDef="let row; columns: columns"></tr>
@@ -78,6 +82,7 @@ import { parseHttpError, useHttp } from '../utils/request';
 })
 export class GroundUnitsPage implements OnInit {
   readonly store = inject(GroundUnitStore);
+  readonly schedule = inject(ScheduleStore);
   private readonly fb = inject(FormBuilder);
   private readonly http = useHttp();
   private readonly dialog = inject(MatDialog);
@@ -86,7 +91,7 @@ export class GroundUnitsPage implements OnInit {
   readonly pagination = usePagination(20);
   readonly canManage = this.auth.hasRole(ROLE.ADMIN, ROLE.SAFETY_MANAGER);
   readonly canReport = this.auth.hasRole(ROLE.ADMIN, ROLE.SAFETY_MANAGER, ROLE.INSPECTOR);
-  readonly columns = ['unit', 'type', 'stand', 'inspection', 'state', 'actions'];
+  readonly columns = ['unit', 'type', 'stand', 'inspection', 'schedule', 'state', 'actions'];
   readonly states: UnitState[] = ['available', 'inspection', 'blocked', 'retired'];
   readonly stateText = UNIT_STATE_TEXT;
   stateFilter = '';
@@ -98,8 +103,8 @@ export class GroundUnitsPage implements OnInit {
     stand: ['', Validators.required], state: ['available' as UnitState, Validators.required], notes: [''],
   });
 
-  ngOnInit(): void { this.reload(); }
-  reload(): void { this.store.load(this.pagination.page(), this.pagination.pageSize(), this.stateFilter, this.searchText); }
+  ngOnInit(): void { this.reload(); this.schedule.load(); }
+  reload(): void { this.store.load(this.pagination.page(), this.pagination.pageSize(), this.stateFilter, this.searchText); this.schedule.load(); }
   resetAndLoad(): void { this.pagination.reset(); this.reload(); }
   pageChanged(event: PageEvent): void { this.pagination.setPage(event.pageIndex + 1); this.pagination.pageSize.set(event.pageSize); this.reload(); }
   typeText(type: string): string { return ({ tug: '牵引车', gpu: '地面电源', belt_loader: '行李传送带', water_service: '清水车', catering: '配餐车' } as Record<string, string>)[type] || type; }

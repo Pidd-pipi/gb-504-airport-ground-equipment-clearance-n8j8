@@ -73,6 +73,30 @@ export interface TurnaroundSummary {
   due_within_two_hours: number;
 }
 
+export interface OccupancyWindow {
+  turnaround_id: number;
+  flight_no: string;
+  stand: string;
+  status: Turnaround['status'];
+  start_at: string;
+  end_at: string;
+}
+
+export interface UnitOccupancy {
+  unit_id: number;
+  unit_code: string;
+  reserve_minutes: number;
+  current: OccupancyWindow | null;
+  next: OccupancyWindow | null;
+  free_at: string | null;
+  windows: OccupancyWindow[];
+}
+
+export interface OccupancyBoard {
+  reserve_minutes: number;
+  units: Record<string, UnitOccupancy>;
+}
+
 export interface SafetyCheck {
   id: number;
   turnaround_id: number;

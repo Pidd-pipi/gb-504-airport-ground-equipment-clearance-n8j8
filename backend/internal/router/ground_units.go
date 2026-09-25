@@ -12,6 +12,7 @@ func (r *Router) registerGroundUnitRoutes(group *gin.RouterGroup) {
 	routes.Use(middleware.AuthRequired(r.cfg))
 	routes.GET("", r.groundUnit.List)
 	routes.GET("/summary", r.groundUnit.Summary)
+	routes.GET("/occupancy", r.groundUnit.Occupancy)
 	routes.GET("/:id", r.groundUnit.Get)
 	routes.POST("", middleware.RequireRole(constants.RoleAdmin, constants.RoleSafetyManager), r.groundUnit.Create)
 	routes.PATCH("/:id/state", middleware.RequireRole(constants.RoleAdmin, constants.RoleSafetyManager, constants.RoleInspector), r.groundUnit.ChangeState)

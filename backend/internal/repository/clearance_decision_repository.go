@@ -67,6 +67,40 @@ func (r *ClearanceDecisionRepository) FindByTurnaroundTx(tx *gorm.DB, turnaround
 	return &row, nil
 }
 
+// MapByTurnaroundIDs loads the current clearance decision for each turnaround
+// in a single read so occupancy queries do not issue N lookups.
+func (r *ClearanceDecisionRepository) MapByTurnaroundIDs(turnaroundIDs []uint64) (map[uint64]*model.ClearanceDecision, error) {
+	result := make(map[uint64]*model.ClearanceDecision, len(turnaroundIDs))
+	if len(turnaroundIDs) == 0 {
+		return result, nil
+	}
+	var rows []model.ClearanceDecision
+	if err := r.db.Where("turnaround_id IN ?", turnaroundIDs).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list clearances by turnarounds: %w", err)
+	}
+	for index := range rows {
+		result[rows[index].TurnaroundID] = &rows[index]
+	}
+	return result, nil
+}
+
+// MapByTurnaroundIDsTx is the transaction-locked variant of MapByTurnaroundIDs.
+func (r *ClearanceDecisionRepository) MapByTurnaroundIDsTx(tx *gorm.DB, turnaroundIDs []uint64) (map[uint64]*model.ClearanceDecision, error) {
+	result := make(map[uint64]*model.ClearanceDecision, len(turnaroundIDs))
+	if len(turnaroundIDs) == 0 {
+		return result, nil
+	}
+	var rows []model.ClearanceDecision
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("turnaround_id IN ?", turnaroundIDs).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lock clearances by turnarounds: %w", err)
+	}
+	for index := range rows {
+		result[rows[index].TurnaroundID] = &rows[index]
+	}
+	return result, nil
+}
+
 func (r *ClearanceDecisionRepository) SaveTx(tx *gorm.DB, row *model.ClearanceDecision) error {
 	if err := tx.Save(row).Error; err != nil {
 		return fmt.Errorf("save clearance decision: %w", err)

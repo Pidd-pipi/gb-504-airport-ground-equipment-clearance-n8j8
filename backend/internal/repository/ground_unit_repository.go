@@ -62,6 +62,24 @@ func (r *GroundUnitRepository) FindByIDTx(tx *gorm.DB, id uint64) (*model.Ground
 	return &unit, nil
 }
 
+// FindByIDs loads units by id in one query, preserving no particular order.
+func (r *GroundUnitRepository) FindByIDs(ids []uint64) ([]model.GroundUnit, error) {
+	var rows []model.GroundUnit
+	if err := r.db.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("find ground units by ids: %w", err)
+	}
+	return rows, nil
+}
+
+// ListAll returns every registered ground unit for the occupancy board.
+func (r *GroundUnitRepository) ListAll() ([]model.GroundUnit, error) {
+	var rows []model.GroundUnit
+	if err := r.db.Order("unit_code ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list all ground units: %w", err)
+	}
+	return rows, nil
+}
+
 func (r *GroundUnitRepository) List(page, pageSize int, state, unitType, search string) ([]model.GroundUnit, int64, error) {
 	var rows []model.GroundUnit
 	var total int64

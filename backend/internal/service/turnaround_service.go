@@ -87,36 +87,52 @@ func (s *TurnaroundService) Create(row *model.Turnaround, checks []model.SafetyC
 		}
 	}
 	row.Status = constants.TurnaroundOpen
+	windowStart := row.ScheduledAt
+	windowEnd := row.WindowEnd()
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		for _, unitID := range unitIDs {
 			if err := s.unitRepo.LockAssignmentTx(tx, unitID); err != nil {
 				return err
 			}
 		}
-		seenTurnarounds := make(map[uint64]struct{})
+		lockedUnits := make(map[uint64]*model.GroundUnit, len(unitIDs))
 		for _, unitID := range unitIDs {
-			active, err := s.repo.FindActiveByGroundUnitTx(tx, unitID)
+			unit, err := s.unitRepo.FindByIDTx(tx, unitID)
+			if err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					return util.NewAppError(constants.CodeValidationFailed, "ground unit does not exist")
+				}
+				return err
+			}
+			if unit.State != constants.UnitAvailable {
+				return util.NewAppError(constants.CodeValidationFailed, "all assigned ground units must be available")
+			}
+			lockedUnits[unitID] = unit
+		}
+		// Planned-window scheduling: each turnaround reserves the unit for 90
+		// minutes from its scheduled time. Completed and revoked turnarounds do
+		// not occupy the schedule; half-open windows may chain back-to-back.
+		for _, unitID := range unitIDs {
+			candidates, err := s.repo.FindWindowConflictsTx(tx, unitID, windowStart, windowEnd)
 			if err != nil {
 				return err
 			}
-			for _, existing := range active {
-				if _, seen := seenTurnarounds[existing.ID]; seen {
+			if len(candidates) == 0 {
+				continue
+			}
+			candidateIDs := make([]uint64, 0, len(candidates))
+			for _, candidate := range candidates {
+				candidateIDs = append(candidateIDs, candidate.ID)
+			}
+			decisions, err := s.clearanceRepo.MapByTurnaroundIDsTx(tx, candidateIDs)
+			if err != nil {
+				return err
+			}
+			for _, candidate := range candidates {
+				if !turnaroundHolds(decisions[candidate.ID]) {
 					continue
 				}
-				seenTurnarounds[existing.ID] = struct{}{}
-				if existing.Status == constants.TurnaroundOpen || existing.Status == constants.TurnaroundChecking {
-					return util.NewAppError(constants.CodeStateConflict, "ground unit is assigned to an active turnaround")
-				}
-				decision, err := s.clearanceRepo.FindByTurnaroundTx(tx, existing.ID)
-				if err != nil || decision.State != constants.ClearanceRevoked {
-					return util.NewAppError(constants.CodeStateConflict, "ground unit is assigned to an active turnaround")
-				}
-			}
-		}
-		for _, unitID := range unitIDs {
-			unit, err := s.unitRepo.FindByIDTx(tx, unitID)
-			if err != nil || unit.State != constants.UnitAvailable {
-				return util.NewAppError(constants.CodeValidationFailed, "all assigned ground units must be available")
+				return NewWindowConflictError(lockedUnits, unitID, candidate)
 			}
 		}
 		if err := s.repo.CreateTx(tx, row); err != nil {

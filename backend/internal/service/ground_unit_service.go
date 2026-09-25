@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"groundclearance/internal/constants"
+	"groundclearance/internal/dto"
 	"groundclearance/internal/model"
 	"groundclearance/internal/repository"
 	"groundclearance/internal/util"
@@ -182,4 +184,134 @@ func allowedUnitTransition(from, to string) bool {
 	default:
 		return false
 	}
+}
+
+// windowsOverlap reports whether two half-open planned windows overlap.
+// Touching boundaries do not count, so 90-minute windows can chain back-to-back.
+func windowsOverlap(startA, endA, startB, endB time.Time) bool {
+	return startA.Before(endB) && startB.Before(endA)
+}
+
+// turnaroundHolds reports whether a turnaround currently occupies the schedule.
+// A non-revoked decision keeps the window in place; a missing decision is
+// treated conservatively as still holding.
+func turnaroundHolds(decision *model.ClearanceDecision) bool {
+	return decision == nil || decision.State != constants.ClearanceRevoked
+}
+
+func unitCodeOf(units map[uint64]*model.GroundUnit, unitID uint64) string {
+	if unit, ok := units[unitID]; ok {
+		return unit.UnitCode
+	}
+	return "#" + strconv.FormatUint(unitID, 10)
+}
+
+// NewWindowConflictError points the create form at the blocking flight and at
+// the occupied planned window so the operator knows which schedule conflicts.
+func NewWindowConflictError(units map[uint64]*model.GroundUnit, unitID uint64, blocker model.Turnaround) *util.AppError {
+	start := blocker.WindowStart().Format("01-02 15:04")
+	end := blocker.WindowEnd().Format("15:04")
+	return util.NewAppError(constants.CodeStateConflict,
+		"设备 "+unitCodeOf(units, unitID)+" 在计划窗口 "+start+"–"+end+
+			" 已被航班 "+blocker.FlightNo+" 占用，计划窗口重叠，无法重复排班")
+}
+
+// Occupancy builds the planned-window read model for the given units (or every
+// unit when the list is empty). Each turnaround reserves assigned units for
+// ScheduleWindowMinutes from its scheduled time; completed turnarounds and
+// revoked clearance decisions never occupy the schedule.
+func (s *GroundUnitService) Occupancy(unitIDs []uint64, now time.Time) (*dto.OccupancyBoard, error) {
+	unitMap := make(map[uint64]*model.GroundUnit)
+	if len(unitIDs) == 0 {
+		units, err := s.repo.ListAll()
+		if err != nil {
+			return nil, err
+		}
+		unitIDs = make([]uint64, 0, len(units))
+		for index := range units {
+			unitIDs = append(unitIDs, units[index].ID)
+			unitMap[units[index].ID] = &units[index]
+		}
+	} else {
+		units, err := s.repo.FindByIDs(unitIDs)
+		if err != nil {
+			return nil, err
+		}
+		for index := range units {
+			unitMap[units[index].ID] = &units[index]
+		}
+	}
+	board := &dto.OccupancyBoard{
+		ReserveMinutes: constants.ScheduleWindowMinutes,
+		Units:          make(map[uint64]*dto.UnitOccupancy, len(unitIDs)),
+	}
+	for _, unitID := range unitIDs {
+		occupancy := &dto.UnitOccupancy{
+			UnitID: unitID, ReserveMinutes: constants.ScheduleWindowMinutes,
+			Windows: []dto.OccupancyWindow{},
+		}
+		if unit, ok := unitMap[unitID]; ok {
+			occupancy.UnitCode = unit.UnitCode
+		}
+		board.Units[unitID] = occupancy
+	}
+	rows, err := s.turnaroundRepo.ListOccupyingByUnits(unitIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return board, nil
+	}
+	turnaroundIDs := make([]uint64, 0, len(rows))
+	seen := make(map[uint64]struct{}, len(rows))
+	for _, row := range rows {
+		if _, ok := seen[row.ID]; ok {
+			continue
+		}
+		seen[row.ID] = struct{}{}
+		turnaroundIDs = append(turnaroundIDs, row.ID)
+	}
+	decisions, err := s.clearanceRepo.MapByTurnaroundIDs(turnaroundIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if !turnaroundHolds(decisions[row.ID]) {
+			continue
+		}
+		window := dto.OccupancyWindow{
+			TurnaroundID: row.ID, FlightNo: row.FlightNo, Stand: row.Stand, Status: row.Status,
+			StartAt: row.WindowStart(), EndAt: row.WindowEnd(),
+		}
+		for _, rawID := range row.GroundUnitIDs {
+			unitID, parseErr := strconv.ParseUint(rawID, 10, 64)
+			if parseErr != nil {
+				continue
+			}
+			if occupancy, ok := board.Units[unitID]; ok {
+				occupancy.Windows = append(occupancy.Windows, window)
+			}
+		}
+	}
+	for _, occupancy := range board.Units {
+		if len(occupancy.Windows) == 0 {
+			continue
+		}
+		for index := range occupancy.Windows {
+			window := occupancy.Windows[index]
+			switch {
+			case occupancy.Current == nil && !now.Before(window.StartAt) && now.Before(window.EndAt):
+				occupancy.Current = &occupancy.Windows[index]
+			case window.StartAt.After(now):
+				if occupancy.Next == nil || window.StartAt.Before(occupancy.Next.StartAt) {
+					occupancy.Next = &occupancy.Windows[index]
+				}
+			}
+		}
+		if occupancy.Current != nil {
+			end := occupancy.Current.EndAt
+			occupancy.FreeAt = &end
+		}
+	}
+	return board, nil
 }

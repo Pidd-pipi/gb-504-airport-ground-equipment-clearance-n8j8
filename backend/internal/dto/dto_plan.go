@@ -31,3 +31,31 @@ type SafetyCheckReviewRequest struct {
 	Evidence []string `json:"evidence" binding:"required,min=1"`
 	Remark   string   `json:"remark" binding:"max=1000"`
 }
+
+// OccupancyWindow is one planned 90-minute occupation segment on a ground unit.
+type OccupancyWindow struct {
+	TurnaroundID uint64    `json:"turnaround_id"`
+	FlightNo     string    `json:"flight_no"`
+	Stand        string    `json:"stand"`
+	Status       string    `json:"status"`
+	StartAt      time.Time `json:"start_at"`
+	EndAt        time.Time `json:"end_at"`
+}
+
+// UnitOccupancy is the scheduling read model for one ground unit. Completed
+// turnarounds and revoked clearance decisions never occupy the schedule.
+type UnitOccupancy struct {
+	UnitID         uint64            `json:"unit_id"`
+	UnitCode       string            `json:"unit_code"`
+	ReserveMinutes int               `json:"reserve_minutes"`
+	Current        *OccupancyWindow  `json:"current"`
+	Next           *OccupancyWindow  `json:"next"`
+	FreeAt         *time.Time        `json:"free_at"`
+	Windows        []OccupancyWindow `json:"windows"`
+}
+
+// OccupancyBoard groups the per-unit schedule by unit id.
+type OccupancyBoard struct {
+	ReserveMinutes int                       `json:"reserve_minutes"`
+	Units          map[uint64]*UnitOccupancy `json:"units"`
+}

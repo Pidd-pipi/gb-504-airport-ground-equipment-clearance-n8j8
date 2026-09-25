@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"groundclearance/internal/constants"
 	"groundclearance/internal/dto"
@@ -43,6 +45,32 @@ func (h *GroundUnitHandler) Summary(c *gin.Context) {
 		return
 	}
 	OK(c, result)
+}
+
+// Occupancy returns the current/next planned occupation window for ground
+// units. Accepts an optional comma-separated unit_ids filter.
+func (h *GroundUnitHandler) Occupancy(c *gin.Context) {
+	var unitIDs []uint64
+	if raw := strings.TrimSpace(c.Query("unit_ids")); raw != "" {
+		for _, token := range strings.Split(raw, ",") {
+			id, err := strconv.ParseUint(strings.TrimSpace(token), 10, 64)
+			if err != nil || id == 0 {
+				Fail(c, http.StatusBadRequest, constants.CodeBadRequest, "invalid unit_ids")
+				return
+			}
+			unitIDs = append(unitIDs, id)
+		}
+		if len(unitIDs) > 200 {
+			Fail(c, http.StatusBadRequest, constants.CodeBadRequest, "too many unit_ids")
+			return
+		}
+	}
+	board, err := h.svc.Occupancy(unitIDs, time.Now())
+	if err != nil {
+		handleServiceError(c, h.logger, err, "ground unit occupancy")
+		return
+	}
+	OK(c, board)
 }
 
 func (h *GroundUnitHandler) Get(c *gin.Context) {

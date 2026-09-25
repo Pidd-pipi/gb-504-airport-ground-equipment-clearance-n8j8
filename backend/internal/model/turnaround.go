@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"groundclearance/internal/constants"
+)
 
 // Turnaround tracks one operational phase for an arriving or departing flight.
 type Turnaround struct {
@@ -19,3 +23,12 @@ type Turnaround struct {
 }
 
 func (Turnaround) TableName() string { return "turnarounds" }
+
+// WindowStart is the beginning of the planned occupation window for assigned units.
+func (t Turnaround) WindowStart() time.Time { return t.ScheduledAt }
+
+// WindowEnd is the exclusive end of the planned occupation window. Two windows
+// are allowed to chain back-to-back when one ends exactly when the next starts.
+func (t Turnaround) WindowEnd() time.Time {
+	return t.ScheduledAt.Add(constants.ScheduleWindowMinutes * time.Minute)
+}

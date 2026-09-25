@@ -67,6 +67,11 @@ const (
 
 var TurnaroundStatusValues = []string{TurnaroundOpen, TurnaroundChecking, TurnaroundDecisioned, TurnaroundCompleted}
 
+// ScheduleWindowMinutes is the planned occupation window reserved for a ground
+// unit from a turnaround's scheduled time. Windows are half-open, so a new
+// window starting exactly when the previous one ends can be chained.
+const ScheduleWindowMinutes = 90
+
 const (
 	CheckPending = "pending"
 	CheckPassed  = "passed"
