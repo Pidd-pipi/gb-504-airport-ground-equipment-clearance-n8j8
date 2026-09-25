@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,6 +69,48 @@ func (s *GroundUnitService) List(page, pageSize int, state, unitType, search str
 
 func (s *GroundUnitService) Summary() (map[string]any, error) {
 	return s.repo.Summary()
+}
+
+// Occupancy builds the per-unit reservation board: the next window that still
+// occupies each unit, or no window when the unit is free. Completed
+// turnarounds and revoked clearances no longer appear here.
+func (s *GroundUnitService) Occupancy() (map[string]any, error) {
+	now := time.Now()
+	units, err := s.repo.ListAll()
+	if err != nil {
+		return nil, err
+	}
+	turnarounds, err := s.turnaroundRepo.ListOccupying(now, constants.OccupancyWindow)
+	if err != nil {
+		return nil, err
+	}
+	nextByUnit := make(map[uint64]model.Turnaround, len(units))
+	for _, turnaround := range turnarounds {
+		for _, rawID := range turnaround.GroundUnitIDs {
+			unitID, parseErr := strconv.ParseUint(rawID, 10, 64)
+			if parseErr != nil || unitID == 0 {
+				continue
+			}
+			if _, taken := nextByUnit[unitID]; !taken {
+				nextByUnit[unitID] = turnaround
+			}
+		}
+	}
+	items := make([]model.UnitOccupancy, 0, len(units))
+	for _, unit := range units {
+		item := model.UnitOccupancy{UnitID: unit.ID, UnitCode: unit.UnitCode, State: unit.State}
+		if turnaround, ok := nextByUnit[unit.ID]; ok {
+			start := turnaround.ScheduledAt
+			end := start.Add(constants.OccupancyWindow)
+			item.TurnaroundID = turnaround.ID
+			item.FlightNo = turnaround.FlightNo
+			item.WindowStart = &start
+			item.WindowEnd = &end
+			item.OccupiedNow = !now.Before(start) && now.Before(end)
+		}
+		items = append(items, item)
+	}
+	return map[string]any{"window_minutes": int(constants.OccupancyWindow / time.Minute), "items": items}, nil
 }
 
 func (s *GroundUnitService) Get(id uint64) (*model.GroundUnit, error) {

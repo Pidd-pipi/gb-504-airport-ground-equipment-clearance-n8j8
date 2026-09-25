@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"groundclearance/internal/constants"
 	"groundclearance/internal/util"
@@ -82,5 +83,46 @@ func TestSharedEnums(t *testing.T) {
 	}
 	if !constants.IsValidRiskLevel(constants.RiskCritical) || constants.IsValidRiskLevel("urgent") {
 		t.Fatal("risk validation mismatch")
+	}
+}
+
+func TestOccupancyWindowOverlap(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	window := constants.OccupancyWindow
+	cases := []struct {
+		name string
+		a, b time.Time
+		want bool
+	}{
+		{"same start", base, base, true},
+		{"partial overlap", base, base.Add(30 * time.Minute), true},
+		{"overlap from earlier flight", base.Add(45 * time.Minute), base, true},
+		{"back to back after", base, base.Add(window), false},
+		{"back to back before", base.Add(window), base, false},
+		{"disjoint", base, base.Add(2 * window), false},
+	}
+	for _, item := range cases {
+		if got := windowsOverlap(item.a, item.b, window); got != item.want {
+			t.Fatalf("%s: got %v want %v", item.name, got, item.want)
+		}
+	}
+}
+
+func TestTurnaroundOccupiesWindow(t *testing.T) {
+	cases := []struct {
+		status, clearance string
+		want              bool
+	}{
+		{constants.TurnaroundOpen, "", true},
+		{constants.TurnaroundChecking, "", true},
+		{constants.TurnaroundDecisioned, constants.ClearanceCleared, true},
+		{constants.TurnaroundDecisioned, constants.ClearanceRestricted, true},
+		{constants.TurnaroundDecisioned, constants.ClearanceRevoked, false},
+		{constants.TurnaroundCompleted, constants.ClearanceCleared, false},
+	}
+	for _, item := range cases {
+		if got := occupiesWindow(item.status, item.clearance); got != item.want {
+			t.Fatalf("occupies %s/%s: got %v want %v", item.status, item.clearance, got, item.want)
+		}
 	}
 }

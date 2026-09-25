@@ -19,3 +19,10 @@ type Turnaround struct {
 }
 
 func (Turnaround) TableName() string { return "turnarounds" }
+
+// TurnaroundWithClearance enriches a turnaround row with its clearance state so
+// list views can tell whether the reservation window still occupies equipment.
+type TurnaroundWithClearance struct {
+	Turnaround
+	ClearanceState string `json:"clearance_state"`
+}

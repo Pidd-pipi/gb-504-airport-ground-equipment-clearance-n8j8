@@ -1,5 +1,8 @@
 import { ClearanceState, RiskLevel, UnitState } from '../types';
 
+// 与后端 constants.OccupancyWindow 保持一致：地面设备自航班计划时间起预留 90 分钟。
+export const OCCUPANCY_WINDOW_MINUTES = 90;
+
 export const ROLE = {
   ADMIN: 'admin',
   SAFETY_MANAGER: 'safety_manager',

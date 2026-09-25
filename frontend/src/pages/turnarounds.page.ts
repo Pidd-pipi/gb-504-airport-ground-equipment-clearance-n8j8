@@ -13,7 +13,7 @@ import { MatTableModule } from '@angular/material/table';
 import { turnaroundCreateApi, turnaroundStatusApi } from '../api/turnaround.api';
 import { RiskBadgeComponent } from '../components/common/risk-badge.component';
 import { StatusBadgeComponent } from '../components/common/status-badge.component';
-import { ROLE } from '../constants/enums';
+import { OCCUPANCY_WINDOW_MINUTES, ROLE } from '../constants/enums';
 import { useAuth } from '../hooks/use-auth';
 import { usePagination } from '../hooks/use-pagination';
 import { TurnaroundStore } from '../stores/turnaround.store';
@@ -41,7 +41,7 @@ import { parseHttpError, useHttp } from '../utils/request';
     </section>
 
     <section *ngIf="showCreate" class="create-band">
-      <div class="band-title"><mat-icon>add_circle</mat-icon><span><strong>建立航班周转阶段</strong><small>同步创建首个安全检查项和待放行记录</small></span></div>
+      <div class="band-title"><mat-icon>add_circle</mat-icon><span><strong>建立航班周转阶段</strong><small>设备自计划时间起预留 {{ windowMinutes }} 分钟，时段重叠的航班不可复用同一设备</small></span></div>
       <form [formGroup]="form" (ngSubmit)="create()">
         <mat-form-field appearance="outline"><mat-label>航班号</mat-label><input matInput formControlName="flight_no"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>机位</mat-label><input matInput formControlName="stand"></mat-form-field>
@@ -71,6 +71,7 @@ import { parseHttpError, useHttp } from '../utils/request';
         <table mat-table [dataSource]="store.items()">
           <ng-container matColumnDef="flight"><th mat-header-cell *matHeaderCellDef>航班 / 机位</th><td mat-cell *matCellDef="let row"><strong>{{ row.flight_no }}</strong><small>{{ row.stand }} · {{ phaseText(row.phase) }}</small></td></ng-container>
           <ng-container matColumnDef="schedule"><th mat-header-cell *matHeaderCellDef>计划时间</th><td mat-cell *matCellDef="let row">{{ row.scheduled_at | date:'MM-dd HH:mm' }}</td></ng-container>
+          <ng-container matColumnDef="window"><th mat-header-cell *matHeaderCellDef>占用窗口</th><td mat-cell *matCellDef="let row"><ng-container *ngIf="occupies(row); else released">{{ row.scheduled_at | date:'MM-dd HH:mm' }} ~ {{ windowEnd(row) | date:'HH:mm' }}</ng-container><ng-template #released><small class="note">不占位</small></ng-template></td></ng-container>
           <ng-container matColumnDef="units"><th mat-header-cell *matHeaderCellDef>投入设备</th><td mat-cell *matCellDef="let row">{{ row.ground_unit_ids.length ? row.ground_unit_ids.join(', ') : '未分配' }}</td></ng-container>
           <ng-container matColumnDef="risk"><th mat-header-cell *matHeaderCellDef>风险</th><td mat-cell *matCellDef="let row"><app-risk-badge [level]="row.risk_level"></app-risk-badge></td></ng-container>
           <ng-container matColumnDef="status"><th mat-header-cell *matHeaderCellDef>状态</th><td mat-cell *matCellDef="let row"><app-status-badge [value]="row.status"></app-status-badge></td></ng-container>
@@ -91,7 +92,8 @@ export class TurnaroundsPage implements OnInit {
   readonly auth = useAuth();
   readonly pagination = usePagination(20);
   readonly canManage = this.auth.hasRole(ROLE.ADMIN, ROLE.SAFETY_MANAGER);
-  readonly columns = ['flight', 'schedule', 'units', 'risk', 'status', 'actions'];
+  readonly columns = ['flight', 'schedule', 'window', 'units', 'risk', 'status', 'actions'];
+  readonly windowMinutes = OCCUPANCY_WINDOW_MINUTES;
   statusFilter = '';
   searchText = '';
   showCreate = false;
@@ -106,6 +108,8 @@ export class TurnaroundsPage implements OnInit {
 
   ngOnInit(): void { this.reload(); }
   phaseText(phase: string): string { return ({ arrival: '进港', servicing: '保障中', departure: '离港' } as Record<string, string>)[phase] || phase; }
+  occupies(row: Turnaround): boolean { return row.status !== 'completed' && row.clearance_state !== 'revoked'; }
+  windowEnd(row: Turnaround): Date { return new Date(new Date(row.scheduled_at).getTime() + this.windowMinutes * 60000); }
   filterStatus(status: string): void { this.statusFilter = status; this.resetAndLoad(); }
   reload(): void { this.store.load(this.pagination.page(), this.pagination.pageSize(), this.statusFilter, '', this.searchText); }
   resetAndLoad(): void { this.pagination.reset(); this.reload(); }

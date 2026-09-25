@@ -66,6 +66,7 @@ import { parseHttpError, useHttp } from '../utils/request';
           <ng-container matColumnDef="type"><th mat-header-cell *matHeaderCellDef>类型</th><td mat-cell *matCellDef="let row">{{ typeText(row.unit_type) }}</td></ng-container>
           <ng-container matColumnDef="stand"><th mat-header-cell *matHeaderCellDef>机位</th><td mat-cell *matCellDef="let row">{{ row.stand }}</td></ng-container>
           <ng-container matColumnDef="inspection"><th mat-header-cell *matHeaderCellDef>最近检查</th><td mat-cell *matCellDef="let row">{{ row.last_inspection_at ? (row.last_inspection_at | date:'MM-dd HH:mm') : '未记录' }}</td></ng-container>
+          <ng-container matColumnDef="occupancy"><th mat-header-cell *matHeaderCellDef>下一段占用</th><td mat-cell *matCellDef="let row"><ng-container *ngIf="store.occupancy()[row.id] as occ"><span *ngIf="occ.window_start; else free"><strong *ngIf="occ.occupied_now" class="warn">占用中</strong> {{ occ.window_start | date:'MM-dd HH:mm' }} ~ {{ occ.window_end | date:'HH:mm' }}<small>{{ occ.flight_no }}</small></span><ng-template #free><small class="note">空闲</small></ng-template></ng-container></td></ng-container>
           <ng-container matColumnDef="state"><th mat-header-cell *matHeaderCellDef>状态</th><td mat-cell *matCellDef="let row"><app-status-badge [value]="row.state"></app-status-badge><small class="note">{{ row.notes }}</small></td></ng-container>
           <ng-container matColumnDef="actions"><th mat-header-cell *matHeaderCellDef></th><td mat-cell *matCellDef="let row"><div class="row-actions"><button *ngIf="canReport && row.state !== 'blocked' && row.state !== 'retired'" mat-stroked-button color="warn" (click)="changeState(row, 'blocked')">锁定</button><button *ngIf="canManage && (row.state === 'blocked' || row.state === 'inspection')" mat-stroked-button (click)="changeState(row, 'available')">恢复可用</button></div></td></ng-container>
           <tr mat-header-row *matHeaderRowDef="columns"></tr><tr mat-row *matRowDef="let row; columns: columns"></tr>
@@ -86,7 +87,7 @@ export class GroundUnitsPage implements OnInit {
   readonly pagination = usePagination(20);
   readonly canManage = this.auth.hasRole(ROLE.ADMIN, ROLE.SAFETY_MANAGER);
   readonly canReport = this.auth.hasRole(ROLE.ADMIN, ROLE.SAFETY_MANAGER, ROLE.INSPECTOR);
-  readonly columns = ['unit', 'type', 'stand', 'inspection', 'state', 'actions'];
+  readonly columns = ['unit', 'type', 'stand', 'inspection', 'occupancy', 'state', 'actions'];
   readonly states: UnitState[] = ['available', 'inspection', 'blocked', 'retired'];
   readonly stateText = UNIT_STATE_TEXT;
   stateFilter = '';

@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
-import { ApiResponse, GroundUnit, GroundUnitSummary, PageResult, UnitState } from '../types';
+import { ApiResponse, GroundUnit, GroundUnitSummary, OccupancyBoard, PageResult, UnitState } from '../types';
 import { API_BASE, extractData } from '../utils/request';
 
 export interface GroundUnitPayload {
@@ -21,6 +21,10 @@ export function groundUnitListApi(http: HttpClient, page = 1, pageSize = 50, sta
 
 export function groundUnitSummaryApi(http: HttpClient): Observable<GroundUnitSummary> {
   return http.get<ApiResponse<GroundUnitSummary>>(`${API_BASE}/v1/ground-units/summary`).pipe(map(extractData));
+}
+
+export function groundUnitOccupancyApi(http: HttpClient): Observable<OccupancyBoard> {
+  return http.get<ApiResponse<OccupancyBoard>>(`${API_BASE}/v1/ground-units/occupancy`).pipe(map(extractData));
 }
 
 export function groundUnitCreateApi(http: HttpClient, payload: GroundUnitPayload): Observable<GroundUnit> {

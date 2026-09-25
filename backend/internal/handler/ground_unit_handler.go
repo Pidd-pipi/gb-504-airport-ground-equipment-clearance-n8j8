@@ -45,6 +45,15 @@ func (h *GroundUnitHandler) Summary(c *gin.Context) {
 	OK(c, result)
 }
 
+func (h *GroundUnitHandler) Occupancy(c *gin.Context) {
+	result, err := h.svc.Occupancy()
+	if err != nil {
+		handleServiceError(c, h.logger, err, "ground unit occupancy")
+		return
+	}
+	OK(c, result)
+}
+
 func (h *GroundUnitHandler) Get(c *gin.Context) {
 	id, ok := parseID(c)
 	if !ok {

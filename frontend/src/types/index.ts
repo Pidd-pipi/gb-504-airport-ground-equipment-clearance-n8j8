@@ -59,11 +59,28 @@ export interface Turnaround {
   scheduled_at: string;
   risk_level: RiskLevel;
   status: 'open' | 'checking' | 'decisioned' | 'completed';
+  clearance_state: ClearanceState | '';
   ground_unit_ids: string[];
   coordinator_id: number;
   version: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface UnitOccupancy {
+  unit_id: number;
+  unit_code: string;
+  state: UnitState;
+  occupied_now: boolean;
+  turnaround_id?: number;
+  flight_no?: string;
+  window_start: string | null;
+  window_end: string | null;
+}
+
+export interface OccupancyBoard {
+  window_minutes: number;
+  items: UnitOccupancy[];
 }
 
 export interface TurnaroundSummary {

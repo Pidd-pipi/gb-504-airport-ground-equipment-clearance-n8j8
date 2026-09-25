@@ -1,5 +1,13 @@
 package constants
 
+import "time"
+
+// OccupancyWindow is how long a ground unit stays reserved from the scheduled
+// flight time. Windows are half-open: a turnaround starting exactly when the
+// previous reservation ends may follow back to back. Shared with
+// frontend/src/constants/enums.ts (OCCUPANCY_WINDOW_MINUTES).
+const OccupancyWindow = 90 * time.Minute
+
 // API error codes.
 const (
 	CodeOK                 = 0

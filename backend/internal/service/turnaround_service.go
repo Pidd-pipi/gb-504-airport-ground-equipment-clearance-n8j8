@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -95,6 +96,10 @@ func (s *TurnaroundService) Create(row *model.Turnaround, checks []model.SafetyC
 		}
 		seenTurnarounds := make(map[uint64]struct{})
 		for _, unitID := range unitIDs {
+			unit, err := s.unitRepo.FindByIDTx(tx, unitID)
+			if err != nil || unit.State != constants.UnitAvailable {
+				return util.NewAppError(constants.CodeValidationFailed, "all assigned ground units must be available")
+			}
 			active, err := s.repo.FindActiveByGroundUnitTx(tx, unitID)
 			if err != nil {
 				return err
@@ -104,19 +109,20 @@ func (s *TurnaroundService) Create(row *model.Turnaround, checks []model.SafetyC
 					continue
 				}
 				seenTurnarounds[existing.ID] = struct{}{}
-				if existing.Status == constants.TurnaroundOpen || existing.Status == constants.TurnaroundChecking {
-					return util.NewAppError(constants.CodeStateConflict, "ground unit is assigned to an active turnaround")
+				occupies, err := s.stillOccupiesTx(tx, existing)
+				if err != nil {
+					return err
 				}
-				decision, err := s.clearanceRepo.FindByTurnaroundTx(tx, existing.ID)
-				if err != nil || decision.State != constants.ClearanceRevoked {
-					return util.NewAppError(constants.CodeStateConflict, "ground unit is assigned to an active turnaround")
+				if !occupies {
+					continue
 				}
-			}
-		}
-		for _, unitID := range unitIDs {
-			unit, err := s.unitRepo.FindByIDTx(tx, unitID)
-			if err != nil || unit.State != constants.UnitAvailable {
-				return util.NewAppError(constants.CodeValidationFailed, "all assigned ground units must be available")
+				if windowsOverlap(existing.ScheduledAt, row.ScheduledAt, constants.OccupancyWindow) {
+					return util.NewAppError(constants.CodeStateConflict, fmt.Sprintf(
+						"ground unit %s is reserved by flight %s (%s ~ %s)",
+						unit.UnitCode, existing.FlightNo,
+						existing.ScheduledAt.Format("2006-01-02 15:04"),
+						existing.ScheduledAt.Add(constants.OccupancyWindow).Format("15:04")))
+				}
 			}
 		}
 		if err := s.repo.CreateTx(tx, row); err != nil {
@@ -146,7 +152,7 @@ func (s *TurnaroundService) Create(row *model.Turnaround, checks []model.SafetyC
 	return row, nil
 }
 
-func (s *TurnaroundService) List(page, pageSize int, status, risk, search string) ([]model.Turnaround, int64, error) {
+func (s *TurnaroundService) List(page, pageSize int, status, risk, search string) ([]model.TurnaroundWithClearance, int64, error) {
 	status = strings.TrimSpace(status)
 	risk = strings.TrimSpace(risk)
 	search = strings.TrimSpace(search)
@@ -232,6 +238,43 @@ func (s *TurnaroundService) ChangeStatus(id uint64, status string, version int, 
 func allowedTurnaroundTransition(from, to string) bool {
 	return (from == constants.TurnaroundOpen && to == constants.TurnaroundChecking) ||
 		(from == constants.TurnaroundDecisioned && to == constants.TurnaroundCompleted)
+}
+
+// stillOccupiesTx reports whether an existing turnaround still reserves its
+// ground units. Completed turnarounds and revoked clearances release the
+// reservation; a decisioned turnaround without a decision row keeps occupying
+// so equipment is never silently double-booked.
+func (s *TurnaroundService) stillOccupiesTx(tx *gorm.DB, existing model.Turnaround) (bool, error) {
+	if existing.Status != constants.TurnaroundDecisioned {
+		return occupiesWindow(existing.Status, ""), nil
+	}
+	decision, err := s.clearanceRepo.FindByTurnaroundTx(tx, existing.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return true, nil
+		}
+		return false, err
+	}
+	return occupiesWindow(existing.Status, decision.State), nil
+}
+
+// occupiesWindow reports whether a turnaround still reserves its ground units:
+// completed turnarounds and revoked clearances no longer occupy equipment.
+func occupiesWindow(status, clearanceState string) bool {
+	switch status {
+	case constants.TurnaroundOpen, constants.TurnaroundChecking:
+		return true
+	case constants.TurnaroundDecisioned:
+		return clearanceState != constants.ClearanceRevoked
+	default:
+		return false
+	}
+}
+
+// windowsOverlap reports whether two reservation windows of the same length
+// intersect. Windows are half-open, so back-to-back schedules do not conflict.
+func windowsOverlap(aStart, bStart time.Time, window time.Duration) bool {
+	return aStart.Before(bStart.Add(window)) && bStart.Before(aStart.Add(window))
 }
 
 // Readiness evaluates all persisted blockers for a single turnaround. It is a

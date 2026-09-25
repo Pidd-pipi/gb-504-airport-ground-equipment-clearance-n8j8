@@ -27,8 +27,8 @@ docker compose up -d --build
 
 ## 业务能力
 
-- `/turnarounds`：建立航班周转阶段，分配地面设备和首个检查项，跟踪周转状态与风险等级。
-- `/ground-units`：登记牵引车、地面电源、传送带等设备，维护 `available / inspection / blocked / retired` 状态。
+- `/turnarounds`：建立航班周转阶段，分配地面设备和首个检查项，跟踪周转状态与风险等级。同一设备按计划时间起预留 90 分钟，窗口首尾相接可接续，重叠时拒绝建单并指出冲突航班；已完成或已撤销放行的周转不再占位。
+- `/ground-units`：登记牵引车、地面电源、传送带等设备，维护 `available / inspection / blocked / retired` 状态，并展示每台设备的下一段占用窗口或空闲状态。
 - `/checks`：逐项记录检查结论、说明和证据；检查复核使用事务锁且结论不可改写，未处理或失败检查会阻断完全放行。
 - `/clearance`：形成 `cleared / restricted / revoked` 决定；完全放行同时要求全部关联设备可用，限制放行必须填写运行条件，紧急撤销不受未完成检查阻断。
 - `/audit`：查询所有写操作；放行状态迁移额外保存前态、后态、依据、证据和 request id。
@@ -64,6 +64,7 @@ docker-compose.yml
 | GET / PUT | `/users/me` | 当前用户 / 修改姓名 | 登录 |
 | GET / POST | `/users` | 用户列表 / 管理员创建账号 | 管理角色 / 管理员 |
 | GET / POST | `/ground-units` | 查询 / 登记设备 | 登录 / 管理角色 |
+| GET | `/ground-units/occupancy` | 各设备下一段占用窗口或空闲状态 | 登录 |
 | PATCH | `/ground-units/:id/state` | 设备状态迁移（带版本号） | 管理、检查角色 |
 | GET / POST | `/turnarounds` | 查询 / 建立周转 | 登录 / 管理角色 |
 | PATCH | `/turnarounds/:id/status` | 周转状态迁移（带版本号） | 管理角色 |

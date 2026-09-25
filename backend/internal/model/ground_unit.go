@@ -18,3 +18,17 @@ type GroundUnit struct {
 }
 
 func (GroundUnit) TableName() string { return "ground_units" }
+
+// UnitOccupancy is the next reservation window of one ground unit. The
+// equipment board uses it to show what occupies the unit next, or that the
+// unit is free when no window is present.
+type UnitOccupancy struct {
+	UnitID       uint64     `json:"unit_id"`
+	UnitCode     string     `json:"unit_code"`
+	State        string     `json:"state"`
+	OccupiedNow  bool       `json:"occupied_now"`
+	TurnaroundID uint64     `json:"turnaround_id,omitempty"`
+	FlightNo     string     `json:"flight_no,omitempty"`
+	WindowStart  *time.Time `json:"window_start"`
+	WindowEnd    *time.Time `json:"window_end"`
+}

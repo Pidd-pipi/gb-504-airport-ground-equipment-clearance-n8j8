@@ -85,6 +85,15 @@ func (r *GroundUnitRepository) List(page, pageSize int, state, unitType, search 
 	return rows, total, nil
 }
 
+// ListAll returns every registered unit ordered by code for the occupancy board.
+func (r *GroundUnitRepository) ListAll() ([]model.GroundUnit, error) {
+	var rows []model.GroundUnit
+	if err := r.db.Order("unit_code ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list all ground units: %w", err)
+	}
+	return rows, nil
+}
+
 func (r *GroundUnitRepository) UpdateTx(tx *gorm.DB, unit *model.GroundUnit) error {
 	now := time.Now()
 	result := tx.Model(&model.GroundUnit{}).Where("id = ? AND version = ?", unit.ID, unit.Version).

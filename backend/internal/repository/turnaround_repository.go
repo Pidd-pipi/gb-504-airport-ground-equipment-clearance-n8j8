@@ -57,8 +57,8 @@ func (r *TurnaroundRepository) FindActiveByGroundUnitTx(tx *gorm.DB, unitID uint
 	return rows, nil
 }
 
-func (r *TurnaroundRepository) List(page, pageSize int, status, risk, search string) ([]model.Turnaround, int64, error) {
-	var rows []model.Turnaround
+func (r *TurnaroundRepository) List(page, pageSize int, status, risk, search string) ([]model.TurnaroundWithClearance, int64, error) {
+	var rows []model.TurnaroundWithClearance
 	var total int64
 	query := r.db.Model(&model.Turnaround{})
 	if status != "" {
@@ -74,10 +74,30 @@ func (r *TurnaroundRepository) List(page, pageSize int, status, risk, search str
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count turnarounds: %w", err)
 	}
-	if err := query.Order("scheduled_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
+	if err := query.
+		Select("turnarounds.*, COALESCE(clearance_decisions.state, '') AS clearance_state").
+		Joins("LEFT JOIN clearance_decisions ON clearance_decisions.turnaround_id = turnarounds.id").
+		Order("scheduled_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("list turnarounds: %w", err)
 	}
 	return rows, total, nil
+}
+
+// ListOccupying returns turnarounds whose reservation window is still open at
+// now: completed turnarounds and revoked clearances no longer occupy equipment.
+func (r *TurnaroundRepository) ListOccupying(now time.Time, window time.Duration) ([]model.Turnaround, error) {
+	var rows []model.Turnaround
+	if err := r.db.Table("turnarounds AS t").
+		Select("t.*").
+		Joins("LEFT JOIN clearance_decisions d ON d.turnaround_id = t.id").
+		Where("t.status <> ?", "completed").
+		Where("t.scheduled_at > ?", now.Add(-window)).
+		Where("t.status IN ? OR d.state IS NULL OR d.state <> ?", []string{"open", "checking"}, "revoked").
+		Order("t.scheduled_at ASC, t.id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list occupying turnarounds: %w", err)
+	}
+	return rows, nil
 }
 
 func (r *TurnaroundRepository) UpdateStatusTx(tx *gorm.DB, row *model.Turnaround, expectedVersion int) error {

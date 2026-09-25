@@ -66,6 +66,7 @@ table { width: 100%; min-width: 760px; }
 th.mat-mdc-header-cell { height: 44px; background: #f7f9f9; color: #64757b; font-size: 11px; font-weight: 600; }
 td.mat-mdc-cell { min-height: 58px; color: #354950; font-size: 12px; }
 td strong, td small { display: block; }
+td strong.warn { display: inline; margin-right: 4px; color: #b96708; }
 td small { margin-top: 3px; color: #78888e; font-size: 10px; }
 td small.note { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-actions { display: flex; justify-content: flex-end; gap: 6px; }
